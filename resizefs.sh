@@ -1,5 +1,3 @@
-#!/bin/bash
-
 ROOT_PART=/dev/sda2
 PART_NUM="$(echo "$ROOT_PART" | grep -o "[[:digit:]]*$")"
 ROOT_DEV="/dev/$(lsblk -no pkname "$ROOT_PART")"
@@ -18,3 +16,7 @@ n
 p
 w
 
+OFFSET=$(losetup|awk '{print $3}'|tail -n1)
+losetup --show -o ${OFFSET} -f -P ${ROOT_PART} 1> /tmp/loopdev
+LOOPDEV=$(cat /tmp/loopdev)
+mkfs.f2fs -f ${LOOPDEV}
