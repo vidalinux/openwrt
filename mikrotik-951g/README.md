@@ -1,4 +1,4 @@
-# ar934x NAND subpage-write fix (OpenWrt contribution)
+# ar934x NAND subpage-write fix
 
 Fixes the NAND rootfs mount failure / boot loop on ath79 boards that use the
 AR934x NAND controller with software ECC (`ar934x-nand`), e.g. MikroTik
