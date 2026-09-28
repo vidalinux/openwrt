@@ -1,0 +1,56 @@
+From 6689ffea7b68c54d752d24cdacb6b2350a2b1c52 Mon Sep 17 00:00:00 2001
+From: OpenWrt Contributor <contributor@example.com>
+Date: Mon, 28 Sep 2026 18:40:02 -0400
+Subject: [PATCH 1/3] mtd: rawnand: ar934x: disable subpage writes for
+ 2048-byte pages
+
+The AR934x NAND controller only performs ECC on full-page accesses and
+therefore cannot write subpages. The driver still advertises subpage
+support for software ECC, so UBI creates a subpage layout (VID header
+offset 512). That layout cannot be written reliably by the controller,
+so the rootfs fails to mount on the next boot with
+
+  ubi0 error: ubi_read_volume_table: the layout volume was not found
+  VFS: Cannot open root device "" ... Kernel panic
+
+Disable subpage writes for 2048-byte pages. Boards that must keep a
+pre-existing subpage-layout UBI (e.g. Meraki MR18) can opt out with the
+"qca,nand-subpage-writes" property.
+
+Fixes: cb9ccd644bf9 ("ath79: ar934x: still advertise subpage on soft ecc")
+Signed-off-by: OpenWrt Contributor <contributor@example.com>
+---
+ .../files/drivers/mtd/nand/raw/ar934x_nand.c     | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/target/linux/ath79/files/drivers/mtd/nand/raw/ar934x_nand.c b/target/linux/ath79/files/drivers/mtd/nand/raw/ar934x_nand.c
+index 9b40706..f5cdd00 100644
+--- a/target/linux/ath79/files/drivers/mtd/nand/raw/ar934x_nand.c
++++ b/target/linux/ath79/files/drivers/mtd/nand/raw/ar934x_nand.c
+@@ -1325,10 +1325,20 @@ static int ar934x_nfc_attach_chip(struct nand_chip *nand)
+ 	if (ret)
+ 		return ret;
+ 
+-	if (nand->ecc.engine_type == NAND_ECC_ENGINE_TYPE_ON_HOST) {
+-		if (mtd->writesize == 2048)
+-			nand->options |= NAND_NO_SUBPAGE_WRITE;
++	/*
++	 * The controller only performs ECC on full-page accesses, so it cannot
++	 * write subpages. If the driver advertises subpage support, UBI creates
++	 * a subpage layout (VID header offset 512) that the controller can then
++	 * not write/read reliably, so the rootfs fails to mount on the next
++	 * boot. Disable subpage writes; boards that must keep a pre-existing
++	 * subpage-layout UBI (e.g. Meraki MR18) can opt out with the
++	 * "qca,nand-subpage-writes" property.
++	 */
++	if (mtd->writesize == 2048 &&
++	    !of_property_read_bool(dev->of_node, "qca,nand-subpage-writes"))
++		nand->options |= NAND_NO_SUBPAGE_WRITE;
+ 
++	if (nand->ecc.engine_type == NAND_ECC_ENGINE_TYPE_ON_HOST) {
+ 		ret = ar934x_nfc_setup_hwecc(nfc);
+ 		if (ret)
+ 			return ret;
+-- 
+2.55.0
+

@@ -1,0 +1,35 @@
+From 1130719b3e34c0f53911356d5c40a16d47d93403 Mon Sep 17 00:00:00 2001
+From: OpenWrt Contributor <contributor@example.com>
+Date: Mon, 28 Sep 2026 18:40:02 -0400
+Subject: [PATCH 2/3] ath79: meraki-mr18: keep the vendor subpage write layout
+
+The Meraki MR18 ships a vendor UBI that was flashed with the subpage
+VID header layout (offset 512). Opt out of disabling subpage writes so
+that this pre-existing UBI stays readable.
+
+Signed-off-by: OpenWrt Contributor <contributor@example.com>
+---
+ target/linux/ath79/dts/qca9557_meraki_mr18.dts | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/target/linux/ath79/dts/qca9557_meraki_mr18.dts b/target/linux/ath79/dts/qca9557_meraki_mr18.dts
+index 4e9b3d1..48f94b6 100644
+--- a/target/linux/ath79/dts/qca9557_meraki_mr18.dts
++++ b/target/linux/ath79/dts/qca9557_meraki_mr18.dts
+@@ -103,6 +103,13 @@
+ 	nand-ecc-step-size = <512>;
+ 	nand-is-boot-medium;
+ 
++	/*
++	 * Keep the subpage VID header layout used by the vendor (Meraki)
++	 * UBI. The bootloader/rootfs was flashed with that layout, so the
++	 * controller must not disable subpage writes here.
++	 */
++	qca,nand-subpage-writes;
++
+ 	partitions {
+ 		compatible = "fixed-partitions";
+ 		#address-cells = <1>;
+-- 
+2.55.0
+

@@ -1,0 +1,92 @@
+From: OpenWrt Contributor <contributor@example.com>
+Subject: [PATCH 0/3] ar934x NAND: fix UBI rootfs creation on ath79 boards
+
+Hi,
+
+This series fixes a long-standing NAND boot failure on ath79 boards that
+use the AR934x/QCA95xx NAND controller with software ECC (all MikroTik
+NAND RouterBOARDs, e.g. RB951G-2HnD, and the Meraki MR18).
+
+Symptom
+-------
+
+After installing OpenWrt on NAND the board boot-loops:
+
+  ubi0 error: ubi_read_volume_table: the layout volume was not found
+  ubi0 error: ubi_attach_mtd_dev: failed to attach mtd2, error -22
+  VFS: Cannot open root device "" ... Kernel panic
+  Rebooting in 1 seconds..
+
+The kernel itself is loaded fine by RouterBOOT; only the rootfs cannot be
+mounted. Flashing from the initramfs appears to succeed (ubiformat and the
+volume creation complete), but the very next boot cannot read the UBI.
+
+Root cause
+----------
+
+The AR934x NAND controller only performs ECC on full-page accesses and
+cannot write subpages (this is documented in ar934x_nfc_setup_hwecc()).
+However, for software ECC the driver still advertises subpage support, so
+UBI creates a *subpage* layout (VID header offset 512). That layout cannot
+be written/read reliably by this controller, so after the first reboot the
+EC/VID headers are unreadable and the layout volume is "not found".
+
+The same fix was applied once in 6561ca1fa51 ("ath79: ar934x: fix mounting
+issues if subpage is not supported") and then reverted in cb9ccd644bf9
+("ath79: ar934x: still advertise subpage on soft ecc") because the Meraki
+MR18 ships a *pre-existing* vendor UBI that uses the subpage layout.
+
+The fix
+-------
+
+Disable subpage writes for 2048-byte pages by default (the controller
+cannot do them anyway), and let boards that must keep a pre-existing
+subpage-layout UBI opt out via "qca,nand-subpage-writes". The Meraki MR18
+sets that property, so it keeps its current behaviour; MikroTik boards get
+a UBI layout that can actually be written.
+
+Patch 3 is needed because yafut (used for MikroTik NAND since 23.05)
+relies on subpage writes for the final partial chunk of the kernel file
+and would otherwise fail with -EINVAL. kernel2minor + nandwrite write raw
+OOB data and do not depend on subpage writes; this is also what the old
+ar71xx target and RouterBOOT v6 expect (an ELF-in-YAFFS file named
+"kernel").
+
+Patches
+-------
+
+  0001 mtd: rawnand: ar934x: disable subpage writes for 2048-byte pages
+  0002 ath79: meraki-mr18: keep the vendor subpage write layout
+  0003 ath79: mikrotik: write NAND kernel images with kernel2minor
+
+Testing
+-------
+
+Tested on a MikroTik RouterBOARD 951G-2HnD (Samsung 2048+64 NAND,
+RouterBOOT 6.48.6, u-boot/target ath79/mikrotik):
+
+  - TFTP-boot the initramfs, `sysupgrade -n` the squashfs image, reboot.
+  - UBI now attaches with "VID header offset: 2048 (aligned 2048)".
+  - "VFS: Mounted root (squashfs filesystem) readonly".
+  - /overlay is a UBIFS volume on /dev/ubi0_1 and the board survives
+    repeated reboots.
+  - Verified with kernel 6.6 (24.10) and 6.12 (25.12.5).
+
+Built and booted from NAND on both:
+  target/linux/ath79 (subtarget mikrotik), profile
+  mikrotik_routerboard-951g-2hnd.
+
+Notes
+-----
+
+  - "qca,nand-subpage-writes" is a driver-private boolean, not a mainline
+    binding; a binding update for qca,ar934x-nand should accompany this if
+    the driver ever moves upstream.
+  - Patch 3 restores the pre-yafut NAND write path. If the maintainers
+    prefer to keep yafut, the alternative is to teach yafut to pad its
+    final chunk to a full page so it works with subpage writes disabled.
+  - Nothing changes for hardware-ECC boards: NAND_NO_SUBPAGE_WRITE was
+    already set for ECC engine type ON_HOST.
+
+Thanks,
+OpenWrt Contributor
